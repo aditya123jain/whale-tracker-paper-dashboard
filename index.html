@@ -48,6 +48,9 @@ footer{color:var(--mut);font-size:12px;margin-top:22px}
 <div class="tw"><table id="posT"></table></div>
 <h2>Closed trades <span id="closedInfo" style="text-transform:none"></span></h2>
 <div class="tw"><table id="trT"></table></div>
+<h2>Shadow (skipped signals) <span id="shInfo" style="text-transform:none"></span></h2>
+<div class="note" id="shNote"></div>
+<div class="tw"><table id="shT"></table></div>
 <h2>Delay study: price move after the whale signal</h2>
 <div class="tw"><table id="delayT"></table></div>
 <div class="note" id="delayNote"></div>
@@ -111,7 +114,7 @@ function render(){
     <td class="l"><a href="https://dexscreener.com/solana/${esc(t.mint)}" target="_blank" rel="noopener"><b>${esc(t.symbol)}</b></a></td>
     <td>${price(t.price)}</td><td>${money(t.usd)}</td><td class="${cls(t.pnl)}">${t.pnl==null?'–':sgn(t.pnl)}</td><td class="${cls(t.pnl_pct)}">${t.pnl_pct==null?'–':pct(t.pnl_pct)}</td><td class="reason">${esc(t.reason)}</td></tr>`).join('')
    :'<tr><td class="empty" colspan="7">No closed trades yet — both buys are still open</td></tr>'.replace('both buys are still open',d.buys?'open positions are listed above':'no buys yet');
-  renderDelay();renderSigs();drawChart(c.bank);ticker();
+  renderDelay();renderSigs();renderShadow();drawChart(c.bank);ticker();
 }
 function renderDelay(){
   const ds=S.delay_study||{};const H=['1','5','15','60'];
@@ -122,6 +125,16 @@ function renderDelay(){
       return `<td><span class="${cls(e.mean)}">${pct(e.mean)}</span> <span class="s">avg · med ${pct(e.median)} · ${e.pct_up}% up · n=${e.n}</span></td>`}).join('')+'</tr>';}
   $('delayT').innerHTML=h;
   $('delayNote').textContent=`Price change from the price at signal time, measured at +1/+5/+15/+60 minutes after. ${S.n_signals_total} signals logged (${S.n_signals_tradable} tradable-tier, ${S.n_taken} taken). Samples are tiny and fill in as time passes; some follow-ups use a delayed spot-price fallback. This is research, not proof of edge.`;
+}
+function renderShadow(){
+  const sh=S.shadow||{};
+  if(!sh.enabled){$('shInfo').textContent='';$('shNote').textContent='Shadow tracking not active.';$('shT').innerHTML='';return;}
+  const ra=sh.real_since_shadow_start||{};
+  $('shInfo').textContent=`(${sh.entries} entries · ${sh.open} open · ${sh.closed} closed${sh.win_rate_pct==null?'':' · win '+sh.win_rate_pct.toFixed(0)+'%'})`;
+  $('shNote').innerHTML=`Strong whale signals the bot skipped <b>only</b> because of the chart/trend filter or full slots, paper-bought anyway with the same fill model and exit rules. Not part of the bankroll. Since ${esc(String(sh.since).slice(0,16))}: realized <span class="${cls(sh.realized_pnl_usd)}">${sgn(sh.realized_pnl_usd)}</span> · unrealized <span class="${cls(sh.unrealized_pnl_usd)}">${sgn(sh.unrealized_pnl_usd)}</span> · total <span class="${cls(sh.total_pnl_usd)}">${sgn(sh.total_pnl_usd)}</span>. Real trades over the same period: ${ra.closed||0} closed${ra.win_rate_pct==null?'':', win '+ra.win_rate_pct.toFixed(0)+'%'}, avg ${ra.avg_closed_pnl_usd==null?'–':sgn(ra.avg_closed_pnl_usd)}/trade vs shadow avg ${sh.avg_closed_pnl_usd==null?'–':sgn(sh.avg_closed_pnl_usd)}/trade. Tiny samples; shadow exits use whale-sell data only when already cached.`;
+  const op=(sh.open_positions||[]).map(p=>`<tr><td class="l"><a href="${esc(p.dexscreener)}" target="_blank" rel="noopener"><b>${esc(p.symbol)}</b></a></td><td class="l s">${esc(String(p.entry_ist).slice(5,19))}</td><td class="l yes">OPEN</td><td>${price(p.buy_price)}</td><td class="${cls(p.pct_vs_buy)}">${pct(p.pct_vs_buy)}</td><td class="${cls(p.unreal_usd)}">${sgn(p.unreal_usd)}</td><td class="reason">${esc(p.skip_reason)}</td></tr>`);
+  const cl=(sh.closed_positions||[]).map(p=>`<tr><td class="l"><b>${esc(p.symbol)}</b></td><td class="l s">${esc(String(p.entry_ist).slice(5,19))}</td><td class="l s">CLOSED</td><td colspan="2" class="reason">${esc(p.exit_reason||'')}</td><td class="${cls(p.pnl_usd)}">${sgn(p.pnl_usd)}</td><td class="reason">${esc(p.skip_reason)}</td></tr>`);
+  $('shT').innerHTML=(op.length||cl.length)?`<tr><th class="l">Token</th><th class="l">Shadow entry</th><th class="l">Status</th><th>Entry (fill)</th><th>vs entry</th><th>P&amp;L $</th><th class="l">Skipped because</th></tr>`+op.join('')+cl.join(''):'<tr><td class="empty" colspan="7">No shadow entries yet — they open when a strong signal is skipped by the chart filter or full slots</td></tr>';
 }
 function renderSigs(){
   const sg=S.signals||[];
