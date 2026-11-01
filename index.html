@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>PAPER · Whale Tracker</title>
+<style>
+:root{--bg:#0b0e14;--card:#131824;--line:#1f2736;--tx:#e6eaf2;--mut:#8b95a8;--g:#2ecc8f;--r:#ff5c6c;--y:#f5c451;--b:#6ea8fe}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 -apple-system,Segoe UI,Roboto,Inter,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 14px 60px}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}
+h1{font-size:19px;margin:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.badge{background:#3a2f0b;color:var(--y);border:1px solid #6b5514;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;letter-spacing:.08em}
+.tick{color:var(--mut);font-size:12px;display:flex;gap:16px;flex-wrap:wrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mut);margin-right:6px}.dot.ok{background:var(--g);box-shadow:0 0 6px var(--g)}.dot.bad{background:var(--r)}.dot.warn{background:var(--y)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.07em}.v{font-size:22px;font-weight:650;margin-top:2px;font-variant-numeric:tabular-nums}.s{color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+.pos{color:var(--g)}.neg{color:var(--r)}
+h2{font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin:18px 0 8px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+th:first-child,td:first-child{text-align:left}td.l,th.l{text-align:left}
+.tw{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
+tr:last-child td{border-bottom:0}
+a{color:var(--b);text-decoration:none}a:hover{text-decoration:underline}
+.banner{display:none;margin-bottom:12px;padding:9px 12px;border-radius:10px;font-size:13px}
+.banner.warn{display:block;background:#33290a;border:1px solid #6b5514;color:var(--y)}
+.reason{white-space:normal;max-width:360px;color:var(--mut);font-size:12px;text-align:left}
+.empty{color:var(--mut);padding:16px;text-align:center}
+.side-BUY,.yes{color:var(--g);font-weight:600}.side-SELL,.no{color:var(--mut)}
+.note{color:var(--mut);font-size:12px;margin:6px 2px}
+svg text{fill:#8b95a8;font-size:10px}
+footer{color:var(--mut);font-size:12px;margin-top:22px}
+</style></head><body><div class="wrap">
+<header>
+  <h1>🐋 Whale Tracker <span class="badge">PAPER · simulated · no real funds</span></h1>
+  <div class="tick">
+    <span><span id="dBot" class="dot"></span>Last bot update: <b id="tBot">–</b></span>
+    <span><span id="dPx" class="dot"></span>Prices live as of: <b id="tPx">–</b></span>
+  </div>
+</header>
+<div id="banner" class="banner"></div>
+<div class="grid" id="metrics"></div>
+<h2>Bankroll (equity curve)</h2>
+<div class="card" id="chart" style="padding:8px 10px"></div>
+<h2>Open positions <span id="openCount" style="text-transform:none"></span></h2>
+<div class="tw"><table id="posT"></table></div>
+<h2>Closed trades <span id="closedInfo" style="text-transform:none"></span></h2>
+<div class="tw"><table id="trT"></table></div>
+<h2>Delay study: price move after the whale signal</h2>
+<div class="tw"><table id="delayT"></table></div>
+<div class="note" id="delayNote"></div>
+<h2>Recent whale signals</h2>
+<div class="tw"><table id="sigT"></table></div>
+<footer>PAPER TRADING ONLY — no real funds, no wallet. Fills are simulated from Jupiter quotes plus assumed slippage and fees. Open-position P&amp;L is marked to the DexScreener price, before simulated exit slippage and fees. The bot scans every ~5 minutes, so signals and exits can be up to 5 minutes late. Not financial advice. All times IST.</footer>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const SOL='So11111111111111111111111111111111111111112',USDC='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',USDT='Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+let S=null,live={},liveAt=null,liveErr=null,stateErr=null;
+const fmtT=d=>new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true}).format(d)+' IST';
+const parseIST=s=>new Date(String(s).replace(' ','T'));
+const money=(x,d=2)=>x==null||isNaN(x)?'–':(x<0?'-':'')+'$'+Math.abs(x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const sgn=(x,d=2)=>x==null||isNaN(x)?'–':(x>0?'+':x<0?'-':'')+'$'+Math.abs(x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=x=>x==null||isNaN(x)?'–':(x>0?'+':'')+Number(x).toFixed(2)+'%';
+const cls=x=>x>0?'pos':x<0?'neg':'';
+function price(p){if(p==null||isNaN(p))return '–';if(p>=1)return '$'+p.toFixed(4);if(p>=0.01)return '$'+p.toFixed(5);const z=Math.floor(-Math.log10(p));return '$'+p.toFixed(Math.min(z+4,12));}
+function held(h){if(h==null)return '–';const m=Math.round(h*60);return m<60?m+'m':Math.floor(m/60)+'h '+(m%60)+'m';}
+function ago(ms){const s=Math.max(0,Math.round(ms/1000));if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m '+(s%60)+'s ago';return Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m ago';}
+function calc(){
+  const d=S;let val=0,unreal=0,anyLive=false;
+  const rows=d.positions.map(p=>{
+    const lv=live[p.mint];const pr=lv!=null?lv:p.mark;const isLive=lv!=null;if(isLive)anyLive=true;
+    const v=p.qty*pr,u=v-p.cost_usd;val+=v;unreal+=u;
+    return {p,pr,isLive,v,u,upct:p.cost_usd?u/p.cost_usd*100:null,vsBuy:p.buy_price?(pr/p.buy_price-1)*100:null};
+  });
+  const bank=d.cash_usd+val;
+  return {rows,val,unreal,bank,anyLive,total:bank-d.start_bankroll_usd,totalPct:(bank/d.start_bankroll_usd-1)*100,
+    day:d.day_start_usd!=null?bank-d.day_start_usd:null,dayPct:d.day_start_usd?(bank/d.day_start_usd-1)*100:null};
+}
+function card(k,v,s,c){return `<div class="card"><div class="k">${k}</div><div class="v ${c||''}">${v}</div><div class="s">${s||'&nbsp;'}</div></div>`;}
+function render(){
+  const d=S;if(!d)return;const c=calc();
+  $('metrics').innerHTML=
+    card('Bankroll (paper)',money(c.bank),`start ${money(d.start_bankroll_usd)} · ${pct(c.totalPct)}`,cls(c.total))+
+    card('Cash',money(d.cash_usd),`positions ${money(c.val)}`)+
+    card('Total P&L',sgn(c.total),pct(c.totalPct),cls(c.total))+
+    card('Realized P&L',sgn(d.realized_pnl_usd),d.sells?`${d.sells} sells`:'no closed trades yet',cls(d.realized_pnl_usd))+
+    card('Unrealized P&L',sgn(c.unreal),c.anyLive?'marked live':'last bot marks',cls(c.unreal))+
+    card("Today's P&L",c.day==null?'–':sgn(c.day),c.day==null?'no day baseline':pct(c.dayPct),c.day==null?'':cls(c.day))+
+    card('Win rate',d.win_rate_pct==null?'–':d.win_rate_pct.toFixed(0)+'%',d.closed_tokens?`${d.wins}/${d.closed_tokens} closed tokens`:'no closed trades yet')+
+    card('Open positions',d.positions.length+' / '+d.max_open,`${d.buys} buys · ${d.sells} sells total`);
+  $('openCount').textContent='('+d.positions.length+')';
+  $('posT').innerHTML=c.rows.length?
+   `<tr><th>Token</th><th class="l">Links</th><th>Entry (fill)</th><th>Mark</th><th>vs entry</th><th>Cost</th><th>Value</th><th>P&amp;L $</th><th>P&amp;L %</th><th>Stop</th><th class="l">Whale evidence at entry</th><th>Held</th></tr>`+
+   c.rows.map(r=>{const p=r.p,heldH=p.entry_ist?(Date.now()-parseIST(p.entry_ist).getTime())/3600000:p.held_h;
+    return `<tr><td><b>${esc(p.symbol)}</b><div class="s">${esc(p.name)}</div></td>
+    <td class="l"><a href="${esc(p.dexscreener)}" target="_blank" rel="noopener">DexScreener</a> · <a href="https://solscan.io/token/${esc(p.mint)}" target="_blank" rel="noopener">Solscan</a></td>
+    <td>${price(p.buy_price)}</td><td>${price(r.pr)} ${r.isLive?'':'<span title="last bot price (live fetch unavailable)" style="color:var(--y)">●</span>'}</td>
+    <td class="${cls(r.vsBuy)}">${pct(r.vsBuy)}</td><td>${money(p.cost_usd)}</td><td>${money(r.v)}</td>
+    <td class="${cls(r.u)}">${sgn(r.u)}</td><td class="${cls(r.u)}">${pct(r.upct)}</td><td>${price(p.stop_price)}</td>
+    <td class="l s">${p.whale_buy_usd==null?'–':`bought ${money(p.whale_buy_usd,0)} / sold ${money(p.whale_sell_usd||0,0)} · ${p.n_whales} wallets`}</td><td>${held(heldH)}</td></tr>`}).join('')
+   :'<tr><td class="empty" colspan="12">No open positions</td></tr>';
+  const tr=(d.trades||[]).filter(t=>t.side==='SELL');
+  $('closedInfo').textContent=d.closed_tokens?`(${d.sells} sells · win rate ${d.win_rate_pct.toFixed(0)}% · ${d.wins}/${d.closed_tokens} tokens)`:'';
+  $('trT').innerHTML=tr.length?
+   `<tr><th>Time (IST)</th><th class="l">Token</th><th>Price</th><th>USD</th><th>P&amp;L $</th><th>P&amp;L %</th><th class="l">Reason</th></tr>`+
+   tr.map(t=>`<tr><td>${esc(String(t.time).slice(0,19))}</td>
+    <td class="l"><a href="https://dexscreener.com/solana/${esc(t.mint)}" target="_blank" rel="noopener"><b>${esc(t.symbol)}</b></a></td>
+    <td>${price(t.price)}</td><td>${money(t.usd)}</td><td class="${cls(t.pnl)}">${t.pnl==null?'–':sgn(t.pnl)}</td><td class="${cls(t.pnl_pct)}">${t.pnl_pct==null?'–':pct(t.pnl_pct)}</td><td class="reason">${esc(t.reason)}</td></tr>`).join('')
+   :'<tr><td class="empty" colspan="7">No closed trades yet — both buys are still open</td></tr>'.replace('both buys are still open',d.buys?'open positions are listed above':'no buys yet');
+  renderDelay();renderSigs();drawChart(c.bank);ticker();
+}
+function renderDelay(){
+  const ds=S.delay_study||{};const H=['1','5','15','60'];
+  const rowsDef=[['all_signals','All tradable-tier signals'],['taken','Taken (bought)'],['not_taken','Not taken'],['watch','Watch tier (never traded)']];
+  let h='<tr><th class="l">Group</th>'+H.map(x=>`<th>+${x} min</th>`).join('')+'</tr>';
+  for(const [k,l] of rowsDef){const g=ds[k]||{};
+    h+=`<tr><td class="l">${l}</td>`+H.map(x=>{const e=g[x];if(!e||!e.n)return '<td class="s">n=0</td>';
+      return `<td><span class="${cls(e.mean)}">${pct(e.mean)}</span> <span class="s">avg · med ${pct(e.median)} · ${e.pct_up}% up · n=${e.n}</span></td>`}).join('')+'</tr>';}
+  $('delayT').innerHTML=h;
+  $('delayNote').textContent=`Price change from the price at signal time, measured at +1/+5/+15/+60 minutes after. ${S.n_signals_total} signals logged (${S.n_signals_tradable} tradable-tier, ${S.n_taken} taken). Samples are tiny and fill in as time passes; some follow-ups use a delayed spot-price fallback. This is research, not proof of edge.`;
+}
+function renderSigs(){
+  const sg=S.signals||[];
+  $('sigT').innerHTML=sg.length?
+   `<tr><th>Time (IST)</th><th class="l">Token</th><th class="l">Tier</th><th>Whale buy</th><th>Whale sell</th><th>Buyers</th><th>History</th><th class="l">Taken?</th><th>+1m</th><th>+5m</th><th>+15m</th><th>+60m</th><th class="l">Why not</th></tr>`+
+   sg.map(s=>`<tr><td>${esc(String(s.ts_ist).slice(5,19))}</td><td class="l"><a href="${esc(s.dexscreener)}" target="_blank" rel="noopener"><b>${esc(s.symbol)}</b></a></td>
+   <td class="l s">${esc(s.tier)}</td><td>${money(s.whale_buy,0)}</td><td>${money(s.whale_sell,0)}</td><td>${s.buyers==null?'–':s.buyers}</td><td class="s">${s.coverage_min==null?'–':s.coverage_min+'m'}</td>
+   <td class="l ${s.taken?'yes':'no'}">${s.taken?'BOUGHT':'no'}</td>`+['1','5','15','60'].map(k=>{const v=(s.fu||{})[k];return `<td class="${cls(v)}">${v==null?'<span class="s">…</span>':pct(v)}</td>`}).join('')+
+   `<td class="reason">${s.taken?'':esc((s.reasons||[]).join(', '))}</td></tr>`).join('')
+   :'<tr><td class="empty" colspan="13">No signals logged yet</td></tr>';
+}
+function drawChart(bankNow){
+  const d=S;const pts=(d.equity||[]).map(([t,v])=>[parseIST(t).getTime(),v]).filter(x=>!isNaN(x[0]));
+  if(bankNow!=null&&pts.length)pts.push([Date.now(),bankNow]);
+  const W=1100,H=230,L=52,R=12,T=10,B=22;
+  if(pts.length<2){$('chart').innerHTML='<div class="empty">Not enough history yet</div>';return;}
+  const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]).concat([d.start_bankroll_usd]);
+  let x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
+  if(y1-y0<1){y0-=.5;y1+=.5}const pad=(y1-y0)*.12;y0-=pad;y1+=pad;if(x1===x0)x1=x0+1;
+  const X=t=>L+(t-x0)/(x1-x0)*(W-L-R),Y=v=>T+(1-(v-y0)/(y1-y0))*(H-T-B);
+  const path=pts.map((p,i)=>(i?'L':'M')+X(p[0]).toFixed(1)+' '+Y(p[1]).toFixed(1)).join(' ');
+  const up=pts[pts.length-1][1]>=d.start_bankroll_usd,col=up?'#2ecc8f':'#ff5c6c';
+  let grid='';for(let i=0;i<=4;i++){const v=y0+(y1-y0)*i/4,y=Y(v);grid+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="#1f2736"/><text x="${L-6}" y="${y+3}" text-anchor="end">$${v.toFixed(1)}</text>`}
+  const sy=Y(d.start_bankroll_usd);
+  const lbl=t=>new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t));
+  $('chart').innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="none" style="display:block;height:230px">${grid}
+   <line x1="${L}" x2="${W-R}" y1="${sy}" y2="${sy}" stroke="#8b95a8" stroke-dasharray="4 4"/>
+   <path d="${path} L${X(x1)} ${H-B} L${X(x0)} ${H-B}Z" fill="${col}" opacity=".08"/>
+   <path d="${path}" fill="none" stroke="${col}" stroke-width="2"/>
+   <circle cx="${X(pts[pts.length-1][0])}" cy="${Y(pts[pts.length-1][1])}" r="3.5" fill="${col}"/>
+   <text x="${L}" y="${H-6}">${lbl(x0)} IST</text><text x="${W-R}" y="${H-6}" text-anchor="end">${lbl(x1)} IST (live)</text></svg>
+   <div class="s" style="padding:0 4px">Dashed line = starting bankroll ${money(d.start_bankroll_usd)} · ${pts.length-1} snapshots (one per bot scan) + live point. Y-axis is zoomed.</div>`;
+}
+function ticker(){
+  const now=Date.now();
+  if(S){const botT=S.as_of?parseIST(S.as_of).getTime():null;
+    $('tBot').textContent=(S.as_of?String(S.as_of).slice(0,19)+' IST':'–')+(botT?' ('+ago(now-botT)+')':'');
+    $('dBot').className='dot '+(stateErr?'bad':(botT&&now-botT>15*60000)?'warn':'ok');}
+  $('tPx').textContent=liveAt?fmtT(new Date(liveAt))+' ('+ago(now-liveAt)+')':'not yet';
+  $('dPx').className='dot '+(liveErr?'bad':(!liveAt||now-liveAt>30000)?'warn':'ok');
+  let msg='';
+  if(stateErr&&S)msg='Cannot reach dashboard server ('+stateErr+') — showing last loaded data.';
+  if(liveErr&&S&&S.positions.length)msg+=(msg?' ':'')+'DexScreener live prices unavailable ('+liveErr+') — showing last marks from the bot.';
+  if(S&&S.halted)msg+=(msg?' ':'')+'Bot buys halted: '+(S.halt_reason||'');
+  if(S&&S.as_of&&now-parseIST(S.as_of).getTime()>15*60000)msg+=(msg?' ':'')+'Bot has not pushed an update for over 15 minutes.';
+  $('banner').className='banner '+(msg?'warn':'');$('banner').textContent=msg;
+}
+async function loadState(){
+  try{
+    const r=await fetch('/api/state',{cache:'no-store'});
+    if(r.status===404){stateErr=null;$('tBot').textContent='waiting for first bot push…';return;}
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const j=await r.json();S=j.data;stateErr=null;render();pollPrices();
+  }catch(e){stateErr=e.message;ticker();}
+}
+let pxBusy=false;
+async function pollPrices(){
+  if(!S||pxBusy)return;
+  if(!S.positions.length){liveAt=Date.now();liveErr=null;ticker();return;}
+  pxBusy=true;
+  try{
+    const mints=[...new Set(S.positions.map(p=>p.mint))];
+    const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),5000);
+    const r=await fetch('https://api.dexscreener.com/latest/dex/tokens/'+mints.join(','),{cache:'no-store',signal:ctl.signal});clearTimeout(to);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const j=await r.json();const best={};
+    for(const p of j.pairs||[]){
+      if(p.chainId!=='solana'||!mints.includes(p.baseToken.address))continue;
+      if(![SOL,USDC,USDT].includes((p.quoteToken||{}).address))continue;
+      const px=parseFloat(p.priceUsd);if(!(px>0))continue;
+      const liq=(p.liquidity||{}).usd||0,m=p.baseToken.address;
+      if(!best[m]||liq>best[m].liq)best[m]={px,liq};
+    }
+    const nl={};for(const m of mints)if(best[m])nl[m]=best[m].px;
+    if(!Object.keys(nl).length)throw new Error('no prices returned');
+    live=Object.assign({},live,nl);liveAt=Date.now();liveErr=mints.some(m=>!(m in nl))?'some tokens missing':null;render();
+  }catch(e){liveErr=e.name==='AbortError'?'timeout':e.message;ticker();}
+  pxBusy=false;
+}
+loadState();setInterval(loadState,15000);setInterval(pollPrices,10000);setInterval(ticker,1000);
+</script></body></html>

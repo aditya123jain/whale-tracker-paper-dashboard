@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: whale-tracker-dashboard
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: echo "no build"
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PUSH_TOKEN
+        sync: false
