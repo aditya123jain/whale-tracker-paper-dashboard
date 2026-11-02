@@ -51,6 +51,10 @@ footer{color:var(--mut);font-size:12px;margin-top:22px}
 <h2>Shadow (skipped signals) <span id="shInfo" style="text-transform:none"></span></h2>
 <div class="note" id="shNote"></div>
 <div class="tw"><table id="shT"></table></div>
+<h2>Scored shadow (wallet-scorer experiment) <span id="scInfo" style="text-transform:none"></span></h2>
+<div class="note" id="scNote"></div>
+<div class="tw"><table id="scCmp"></table></div>
+<div class="tw"><table id="scT"></table></div>
 <h2>Delay study: price move after the whale signal</h2>
 <div class="tw"><table id="delayT"></table></div>
 <div class="note" id="delayNote"></div>
@@ -114,7 +118,7 @@ function render(){
     <td class="l"><a href="https://dexscreener.com/solana/${esc(t.mint)}" target="_blank" rel="noopener"><b>${esc(t.symbol)}</b></a></td>
     <td>${price(t.price)}</td><td>${money(t.usd)}</td><td class="${cls(t.pnl)}">${t.pnl==null?'–':sgn(t.pnl)}</td><td class="${cls(t.pnl_pct)}">${t.pnl_pct==null?'–':pct(t.pnl_pct)}</td><td class="reason">${esc(t.reason)}</td></tr>`).join('')
    :'<tr><td class="empty" colspan="7">No closed trades yet — both buys are still open</td></tr>'.replace('both buys are still open',d.buys?'open positions are listed above':'no buys yet');
-  renderDelay();renderSigs();renderShadow();drawChart(c.bank);ticker();
+  renderDelay();renderSigs();renderShadow();renderScored();drawChart(c.bank);ticker();
 }
 function renderDelay(){
   const ds=S.delay_study||{};const H=['1','5','15','60'];
@@ -135,6 +139,21 @@ function renderShadow(){
   const op=(sh.open_positions||[]).map(p=>`<tr><td class="l"><a href="${esc(p.dexscreener)}" target="_blank" rel="noopener"><b>${esc(p.symbol)}</b></a></td><td class="l s">${esc(String(p.entry_ist).slice(5,19))}</td><td class="l yes">OPEN</td><td>${price(p.buy_price)}</td><td class="${cls(p.pct_vs_buy)}">${pct(p.pct_vs_buy)}</td><td class="${cls(p.unreal_usd)}">${sgn(p.unreal_usd)}</td><td class="reason">${esc(p.skip_reason)}</td></tr>`);
   const cl=(sh.closed_positions||[]).map(p=>`<tr><td class="l"><b>${esc(p.symbol)}</b></td><td class="l s">${esc(String(p.entry_ist).slice(5,19))}</td><td class="l s">CLOSED</td><td colspan="2" class="reason">${esc(p.exit_reason||'')}</td><td class="${cls(p.pnl_usd)}">${sgn(p.pnl_usd)}</td><td class="reason">${esc(p.skip_reason)}</td></tr>`);
   $('shT').innerHTML=(op.length||cl.length)?`<tr><th class="l">Token</th><th class="l">Shadow entry</th><th class="l">Status</th><th>Entry (fill)</th><th>vs entry</th><th>P&amp;L $</th><th class="l">Skipped because</th></tr>`+op.join('')+cl.join(''):'<tr><td class="empty" colspan="7">No shadow entries yet — they open when a strong signal is skipped by the chart filter or full slots</td></tr>';
+}
+function renderScored(){
+  const sc=S.shadow_scored||{};
+  if(!sc.enabled){$('scInfo').textContent='';$('scNote').textContent='Scored shadow not active.';$('scT').innerHTML='';$('scCmp').innerHTML='';return;}
+  const f=v=>v==null?'–':v.toFixed(0)+'%';
+  $('scInfo').textContent=`(${sc.entries} entries · ${sc.open} open · ${sc.closed} closed${sc.win_rate_pct==null?'':' · win '+sc.win_rate_pct.toFixed(0)+'%'})`;
+  const bd=sc.signal_breakdown||{},sn=sc.scorer||{};
+  const g=k=>{const x=bd[k]||{};const a=(x.fu15||{}).mean,b=(x.fu60||{}).mean;return `${x.n||0} rows (+15m ${a==null?'–':pct(a)}, +60m ${b==null?'–':pct(b)})`};
+  $('scNote').innerHTML=`Paper-only experiment: each wallet's recent swap history is scored; a $50 shadow position opens when the scored whale-flow rule passes AND all hard knock-outs pass (real-book slots and chart filter ignored). Not part of the bankroll, no alerts. Since ${esc(String(sc.since).slice(0,16))}: realized <span class="${cls(sc.realized_pnl_usd)}">${sgn(sc.realized_pnl_usd)}</span> · unrealized <span class="${cls(sc.unrealized_pnl_usd)}">${sgn(sc.unrealized_pnl_usd)}</span> · total <span class="${cls(sc.total_pnl_usd)}">${sgn(sc.total_pnl_usd)}</span>. Signals: plain-but-not-scored ${g('plain_not_scored')}; scored-but-not-plain ${g('scored_not_plain')}; both ${g('plain_and_scored')}. Wallets scored: ${sn.wallets_scored||0} (+${sn.positive||0} / −${sn.negative||0}). Tiny samples; not proof of edge.`;
+  const c=sc.compare_since_scored_start||{};
+  const nm=[['real','Real book'],['existing_shadow','Existing shadow'],['scored_shadow','Scored shadow']];
+  $('scCmp').innerHTML='<tr><th class="l">Book (since scored start)</th><th>Entries</th><th>Closed</th><th>Win %</th><th>Realized (closed)</th><th>Avg / trade</th></tr>'+nm.map(([k,l])=>{const e=c[k]||{};return `<tr><td class="l">${l}</td><td>${e.n_entries||0}</td><td>${e.closed||0}</td><td>${f(e.win_rate_pct)}</td><td class="${cls(e.realized_closed_usd)}">${e.closed?sgn(e.realized_closed_usd):'–'}</td><td class="${cls(e.avg_closed_pnl_usd)}">${e.avg_closed_pnl_usd==null?'–':sgn(e.avg_closed_pnl_usd)}</td></tr>`}).join('');
+  const op=(sc.open_positions||[]).map(p=>`<tr><td class="l"><a href="${esc(p.dexscreener)}" target="_blank" rel="noopener"><b>${esc(p.symbol)}</b></a></td><td class="l s">${esc(String(p.entry_ist).slice(5,19))}</td><td class="l yes">OPEN</td><td>${price(p.buy_price)}</td><td class="${cls(p.pct_vs_buy)}">${pct(p.pct_vs_buy)}</td><td class="${cls(p.unreal_usd)}">${sgn(p.unreal_usd)}</td><td class="reason">${esc(p.skip_reason)}</td></tr>`);
+  const cl=(sc.closed_positions||[]).map(p=>`<tr><td class="l"><b>${esc(p.symbol)}</b></td><td class="l s">${esc(String(p.entry_ist).slice(5,19))}</td><td class="l s">CLOSED</td><td colspan="2" class="reason">${esc(p.exit_reason||'')}</td><td class="${cls(p.pnl_usd)}">${sgn(p.pnl_usd)}</td><td class="reason">${esc(p.skip_reason)}</td></tr>`);
+  $('scT').innerHTML=(op.length||cl.length)?`<tr><th class="l">Token</th><th class="l">Entry</th><th class="l">Status</th><th>Entry (fill)</th><th>vs entry</th><th>P&amp;L $</th><th class="l">Scored because</th></tr>`+op.join('')+cl.join(''):'<tr><td class="empty" colspan="7">No scored-shadow entries yet</td></tr>';
 }
 function renderSigs(){
   const sg=S.signals||[];
