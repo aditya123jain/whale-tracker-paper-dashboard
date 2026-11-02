@@ -55,6 +55,10 @@ footer{color:var(--mut);font-size:12px;margin-top:22px}
 <div class="note" id="scNote"></div>
 <div class="tw"><table id="scCmp"></table></div>
 <div class="tw"><table id="scT"></table></div>
+<h2>Early-trail 15% test <span id="t5Info" style="text-transform:none"></span></h2>
+<div class="note" id="t5Note"></div>
+<div class="tw"><table id="t5Cmp"></table></div>
+<div class="tw"><table id="t5T"></table></div>
 <h2>Delay study: price move after the whale signal</h2>
 <div class="tw"><table id="delayT"></table></div>
 <div class="note" id="delayNote"></div>
@@ -118,7 +122,7 @@ function render(){
     <td class="l"><a href="https://dexscreener.com/solana/${esc(t.mint)}" target="_blank" rel="noopener"><b>${esc(t.symbol)}</b></a></td>
     <td>${price(t.price)}</td><td>${money(t.usd)}</td><td class="${cls(t.pnl)}">${t.pnl==null?'–':sgn(t.pnl)}</td><td class="${cls(t.pnl_pct)}">${t.pnl_pct==null?'–':pct(t.pnl_pct)}</td><td class="reason">${esc(t.reason)}</td></tr>`).join('')
    :'<tr><td class="empty" colspan="7">No closed trades yet — both buys are still open</td></tr>'.replace('both buys are still open',d.buys?'open positions are listed above':'no buys yet');
-  renderDelay();renderSigs();renderShadow();renderScored();drawChart(c.bank);ticker();
+  renderDelay();renderSigs();renderShadow();renderScored();renderTrail15();drawChart(c.bank);ticker();
 }
 function renderDelay(){
   const ds=S.delay_study||{};const H=['1','5','15','60'];
@@ -154,6 +158,18 @@ function renderScored(){
   const op=(sc.open_positions||[]).map(p=>`<tr><td class="l"><a href="${esc(p.dexscreener)}" target="_blank" rel="noopener"><b>${esc(p.symbol)}</b></a></td><td class="l s">${esc(String(p.entry_ist).slice(5,19))}</td><td class="l yes">OPEN</td><td>${price(p.buy_price)}</td><td class="${cls(p.pct_vs_buy)}">${pct(p.pct_vs_buy)}</td><td class="${cls(p.unreal_usd)}">${sgn(p.unreal_usd)}</td><td class="reason">${esc(p.skip_reason)}</td></tr>`);
   const cl=(sc.closed_positions||[]).map(p=>`<tr><td class="l"><b>${esc(p.symbol)}</b></td><td class="l s">${esc(String(p.entry_ist).slice(5,19))}</td><td class="l s">CLOSED</td><td colspan="2" class="reason">${esc(p.exit_reason||'')}</td><td class="${cls(p.pnl_usd)}">${sgn(p.pnl_usd)}</td><td class="reason">${esc(p.skip_reason)}</td></tr>`);
   $('scT').innerHTML=(op.length||cl.length)?`<tr><th class="l">Token</th><th class="l">Entry</th><th class="l">Status</th><th>Entry (fill)</th><th>vs entry</th><th>P&amp;L $</th><th class="l">Scored because</th></tr>`+op.join('')+cl.join(''):'<tr><td class="empty" colspan="7">No scored-shadow entries yet</td></tr>';
+}
+function renderTrail15(){
+  const t=S.shadow_trail15||{};
+  if(!t.enabled){$('t5Info').textContent='';$('t5Note').textContent='Exit test not active.';$('t5T').innerHTML='';$('t5Cmp').innerHTML='';return;}
+  const c=t.compare_same_entries||{};
+  $('t5Info').textContent=`(${t.entries} entries · ${t.open} open · ${t.closed} closed${t.win_rate_pct==null?'':' · win '+t.win_rate_pct.toFixed(0)+'%'})`;
+  $('t5Note').innerHTML=`<b>${esc(t.label||'Exit test: 15% early trail + TP 1.25x')}</b> — paper-only copy of every real entry (same token, time and entry fill, $50) managed with the real exit rules except: first take-profit (sell 1/3) at <b>1.25x</b> instead of 1.5x, and the trailing stop for a 1.3x–1.5x peak is <b>15%</b> below peak instead of 25%. Not part of the bankroll, no alerts; the real book is unchanged. Since ${esc(String(t.since).slice(0,16))}: realized <span class="${cls(t.realized_pnl_usd)}">${sgn(t.realized_pnl_usd)}</span> · unrealized <span class="${cls(t.unrealized_pnl_usd)}">${sgn(t.unrealized_pnl_usd)}</span> · total <span class="${cls(t.total_pnl_usd)}">${sgn(t.total_pnl_usd)}</span>. On the same entries that are closed in both books (${c.both_closed||0}): real <span class="${cls(c.real_pnl_usd_closed_pairs)}">${sgn(c.real_pnl_usd_closed_pairs||0)}</span> vs test <span class="${cls(c.trail15_pnl_usd_closed_pairs)}">${sgn(c.trail15_pnl_usd_closed_pairs||0)}</span> (difference ${sgn(c.delta_usd_closed_pairs||0)}; better ${c.better||0} / worse ${c.worse||0} / same ${c.same||0}). Tiny sample; plan: ~2 weeks or 40+ trades before judging.`;
+  const pr=t.pairs||[];
+  $('t5Cmp').innerHTML=pr.length?'<tr><th class="l">Token</th><th class="l">Entry</th><th>Real P&amp;L</th><th>Test P&amp;L</th><th>Test − real</th><th class="l">Status</th><th class="l">Real exit</th><th class="l">Test exit</th></tr>'+pr.map(x=>`<tr><td class="l"><b>${esc(x.symbol)}</b></td><td class="l s">${esc(String(x.entry_ist).slice(5,19))}</td><td class="${cls(x.real_pnl_usd)}">${sgn(x.real_pnl_usd)}</td><td class="${cls(x.trail15_pnl_usd)}">${sgn(x.trail15_pnl_usd)}</td><td class="${cls(x.delta_usd)}">${sgn(x.delta_usd)}</td><td class="l s">${x.both_closed?'closed in both':('open: '+(x.real_closed?'':'real ')+(x.trail15_closed?'':'test'))}</td><td class="reason">${esc(x.real_exit||'')}</td><td class="reason">${esc(x.trail15_exit||'')}</td></tr>`).join(''):'<tr><td class="empty" colspan="8">No mirrored entries yet</td></tr>';
+  const op=(t.open_positions||[]).map(p=>`<tr><td class="l"><a href="${esc(p.dexscreener)}" target="_blank" rel="noopener"><b>${esc(p.symbol)}</b></a></td><td class="l s">${esc(String(p.entry_ist).slice(5,19))}</td><td class="l yes">OPEN</td><td>${price(p.buy_price)}</td><td class="${cls(p.pct_vs_buy)}">${pct(p.pct_vs_buy)}</td><td class="${cls(p.unreal_usd)}">${sgn(p.unreal_usd)}</td><td class="l s">peak ${p.peak_x}x · TP stage ${p.tp_stage}</td></tr>`);
+  const cl=(t.closed_positions||[]).map(p=>`<tr><td class="l"><b>${esc(p.symbol)}</b></td><td class="l s">${esc(String(p.entry_ist).slice(5,19))}</td><td class="l s">CLOSED</td><td colspan="2" class="reason">${esc(p.exit_reason||'')}</td><td class="${cls(p.pnl_usd)}">${sgn(p.pnl_usd)}</td><td></td></tr>`);
+  $('t5T').innerHTML=(op.length||cl.length)?`<tr><th class="l">Token</th><th class="l">Entry</th><th class="l">Status</th><th>Entry (fill)</th><th>vs entry</th><th>P&amp;L $</th><th class="l">Detail</th></tr>`+op.join('')+cl.join(''):'<tr><td class="empty" colspan="7">No test-book entries yet</td></tr>';
 }
 function renderSigs(){
   const sg=S.signals||[];
